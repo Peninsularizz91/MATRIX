@@ -1,17 +1,17 @@
 /*
- * Copyright (c) 2024-2025 James Ross
+ * Copyright (c) 2024-2026 James Ross / Snake Game Adaptation
  * SPDX-License-Identifier: Apache-2.0
  */
 
 `default_nettype none
 
 module tt_um_vga_glyph_mode(
-    input  wire [7:0] ui_in,    // Dedicated inputs
-    output wire [7:0] uo_out,   // Dedicated outputs
+    input  wire [7:0] ui_in,    // Dedicated inputs (e.g., Direction controls: Up, Down, Left, Right)
+    output wire [7:0] uo_out,   // Dedicated outputs (VGA Pmod signals)
     input  wire [7:0] uio_in,   // IOs: Input path
     output wire [7:0] uio_out,  // IOs: Output path
-    output wire [7:0] uio_oe,   // IOs: Enable path (active high: 0=input, 1=output)
-    input  wire       ena,      // always 1 when the design is powered, so you can ignore it
+    output wire [7:0] uio_oe,   // IOs: Enable path
+    input  wire       ena,      // always 1 when powered
     input  wire       clk,      // clock
     input  wire       rst_n     // reset_n - low to reset
 );
@@ -21,35 +21,20 @@ module tt_um_vga_glyph_mode(
     wire [10:0] hpos;
     wire [9:0] vpos;
 
-    // TinyVGA PMOD
+    // TinyVGA PMOD mapping matching your original setup
     assign uo_out = {hsync, RGB[0], RGB[2], RGB[4], vsync, RGB[1], RGB[3], RGB[5]};
 
-    // Unused outputs assigned to 0.
     assign uio_out = 0;
     assign uio_oe  = 0;
 
-    wire [7:0] xb = hpos[10:3];
-    wire [6:0] x_mix = {xb[7] ^ xb[3], xb[1], xb[4], xb[1], xb[6], xb[0], xb[2]};
-    wire [2:0] g_x = hpos[2:0];
-    wire [5:0] yb;
-    wire [3:0] _unused;
-    assign {_unused, yb} = vpos / 10'd12;
-    wire [5:0] g_unused;
-    wire [3:0] g_y;
-    assign {g_unused, g_y} = vpos - {yb, 3'b000} - {1'b0, yb, 2'b00};
-    wire hl;
-
     // Suppress unused signals warning
-    wire _unused_ok = &{ena, ui_in[5:2], uio_in};
+    wire _unused_ok = &{ena, uio_in, ui_in[7:4]};
 
-    reg [9:0] frame;
-    reg rst_drop;
-
-    // VGA output
+    // VGA output generator[cite: 2]
     hvsync_generator hvsync_gen(
         .clk(clk),
         .reset(~rst_n),
-        .mode(ui_in[7:6]),
+        .mode(ui_in[7:6]), // Keep mode selection if desired
         .hsync(hsync),
         .vsync(vsync),
         .display_on(display_on),
@@ -57,84 +42,82 @@ module tt_um_vga_glyph_mode(
         .vpos(vpos)
     );
 
-    // glyphs
-    glyphs_rom glyphs(
-        .c(glyph_index),
-        .y(g_y),
-        .x(g_x),
-        .pixel(hl)
-    );
+    // Define grid size (e.g., 32x32 blocks where each block is 16x16 pixels)
+    wire [5:0] grid_x = hpos[9:4]; 
+    wire [5:0] grid_y = vpos[9:4];
 
-    // palette - Naka-set sa kulay purple/blue tone
-    wire [5:0] color;
-    palette_rom palettes(
-        .cid(y),
-        .pid(2'd2), 
-        .color(color)
-    );
-
-    // Sinunod-sunod ang titik pababa gamit ang yb (row position) para mabasa nang patayo ang HAPPY BIRTHDAY
-    function [5:0] get_hb_glyph;
-        input [5:0] row;
-        reg [3:0] idx;
-        begin
-            idx = row % 4'd14;
-            case (idx)
-                4'd0:  get_hb_glyph = 6'd7;  // H
-                4'd1:  get_hb_glyph = 6'd0;  // A
-                4'd2:  get_hb_glyph = 6'd15; // P
-                4'd3:  get_hb_glyph = 6'd15; // P
-                4'd4:  get_hb_glyph = 6'd24; // Y
-                4'd5:  get_hb_glyph = 6'd26; // (space)
-                4'd6:  get_hb_glyph = 6'd1;  // B
-                4'd7:  get_hb_glyph = 6'd8;  // I
-                4'd8:  get_hb_glyph = 6'd17; // R
-                4'd9:  get_hb_glyph = 6'd19; // T
-                4'd10: get_hb_glyph = 6'd7;  // H
-                4'd11: get_hb_glyph = 6'd3;  // D
-                4'd12: get_hb_glyph = 6'd0;  // A
-                4'd13: get_hb_glyph = 6'd24; // Y
-                default: get_hb_glyph = 6'd26;
-            endcase
-        end
-    endfunction
-
-    wire [5:0] glyph_index = get_hb_glyph(yb);
+    // Simple registers for Snake Head Position
+    reg [5:0] snake_x;
+    reg [5:0] snake_y;
     
-    wire [1:0] a = xb[1:0];
-    wire [3:0] b = xb[5:2];
-    wire [2:0] d = xb[3:2] + 2'd3;
+    // Food Position (Static or pseudo-randomized via frame counters)
+    reg [5:0] food_x;
+    reg [5:0] food_y;
 
-    wire t = &{xb[0] ^ yb[2] ^ frame[7], xb[1] ^ yb[1] ^ frame[8], xb[2] ^ yb[3] ^ frame[9], xb[3] ^ yb[0]}; // toggle glyph
+    // Frame divider for game speed control
+    reg [23:0] move_counter;
 
-    // column features
-    wire s = ^xb[6:0]; // speed of rain
-    wire n = xb[1] ^ xb[3] ^ xb[5]; // lit on or off
+    // Palette color wires
+    wire [5:0] bg_color;
+    wire [5:0] snake_color;
+    wire [5:0] food_color;
 
-    wire [6:0] v = (s ? frame[8:2] : frame[9:3]) - yb - x_mix;
-    wire [3:0] c = {1'b0, a} + d;
-    wire [6:0] e = {3'b000, b} << c;
-    wire [6:0] f = v & e;
-    wire [6:0] x = v >> a;
-    wire [2:0] y = ~x[2:0];
-    wire [9:0] drop = {1'b0, yb, 3'd0} >> s;
-    wire drop_bit = ({3'd0, x_mix} + drop > frame) & ~rst_drop;
-    wire [5:0] glyph_color = {6{drop_bit}} ^ color;
+    palette_rom bg_rom(
+        .cid(3'd0), // black background
+        .pid(2'd2), 
+        .color(bg_color)
+    );
 
-    wire [5:0] z = (&(~v[2:0]) & &(y)) ? 6'd63 : glyph_color;
+    palette_rom snake_rom(
+        .cid(3'd3), // vibrant purple for snake
+        .pid(2'd2), 
+        .color(snake_color)
+    );
 
-    wire [5:0] RGB = (display_on & hl & ~(|f | n | drop_bit)) ? z : 6'd0;
+    palette_rom food_rom(
+        .cid(3'd5), // lighter purple/pink for food
+        .pid(2'd2), 
+        .color(food_color)
+    );
 
-    always @(posedge vsync, negedge rst_n) begin
-        if (~rst_n) begin
-            rst_drop <= 0;
-            frame <= 0;
+    // Game Logic & Movement Update on vertical sync ticks or clock dividers
+    always @(posedge clk, negedge rst_n) begin
+        if (!rst_n) begin
+            snake_x      <= 6'd20;
+            snake_y      <= 6'd15;
+            food_x       <= 6'd10;
+            food_y       <= 6'd10;
+            move_counter <= 0;
         end else begin
-            if (&frame) begin
-                rst_drop <= 1;
+            move_counter <= move_counter + 1;
+            
+            // Slow down movement updates so the snake doesn't fly across screen instantly
+            if (move_counter == 24'd5000000) begin
+                move_counter <= 0;
+                
+                // Basic directional movement controlled by ui_in [3:0] (e.g., Up, Down, Left, Right)
+                case (ui_in[3:0])
+                    4'b0001: snake_y <= snake_y - 1'b1; // Up
+                    4'b0010: snake_y <= snake_y + 1'b1; // Down
+                    4'b0100: snake_x <= snake_x - 1'b1; // Left
+                    4'b1000: snake_x <= snake_x + 1'b1; // Right
+                    default: snake_x <= snake_x + 1'b1; // Default auto-move right
+                endcase
+
+                // Simple food collision check -> reset food to a new pseudo-location
+                if ((snake_x == food_x) && (snake_y == food_y)) begin
+                    food_x <= (move_counter[7:2] % 6'd38) + 2'd2;
+                    food_y <= (move_counter[13:8] % 6'd28) + 2'd2;
+                end
             end
-            frame <= frame + 1;
         end
     end
+
+    // Pixel rendering decision based on grid coordinates
+    wire is_snake = (grid_x == snake_x) && (grid_y == snake_y);
+    wire is_food  = (grid_x == food_x) && (grid_y == food_y);
+
+    // Multiplex final RGB output based on display components
+    wire [5:0] RGB = display_on ? (is_snake ? snake_color : (is_food ? food_color : bg_color)) : 6'd0;
 
 endmodule

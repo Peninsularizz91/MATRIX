@@ -138,7 +138,7 @@ module tt_um_vga_glyph_mode (
     // --- Score Display via glyphs_rom ---
     // Position score at the upper left (Column 2, Row 1)
     wire [5:0] xb = hpos[10:3];
-    wire [5:0] yb = vpos[6:0];
+    wire [5:0] yb = vpos[5:0];
     wire is_score_area = (xb >= 6'd2 && xb <= 6'd3) && (yb >= 6'd2 && yb <= 6'd3);
     
     wire [3:0] glyph_y = vpos[3:0];

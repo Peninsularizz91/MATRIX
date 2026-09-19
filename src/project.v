@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2026 Your Name / Snake Game Adaptation
+ * Copyright (c) 2024-2026 CJ Torres / Snake Game Adaptation
  * SPDX-License-Identifier: Apache-2.0
  */
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2026 James Ross / Snake Game Adaptation
+ * Copyright (c) 2024-2026 James Ross / Snake Game Adaptation with Score & 3-Square Body
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -21,7 +21,7 @@ module tt_um_vga_glyph_mode (
     wire [10:0] hpos;
     wire [9:0] vpos;
 
-    // TinyVGA PMOD color mapping layout matching the playground
+    // TinyVGA PMOD color mapping layout
     assign uo_out = {hsync, RGB[0], RGB[2], RGB[4], vsync, RGB[1], RGB[3], RGB[5]};
 
     assign uio_out = 0;
@@ -30,11 +30,11 @@ module tt_um_vga_glyph_mode (
     // Suppress unused signals warning
     wire _unused_ok = &{ena, uio_in, ui_in[7:4]};
 
-    // VGA timing generation module
+    // VGA timing generation module[cite: 2]
     hvsync_generator hvsync_gen(
         .clk(clk),
         .reset(~rst_n),
-        .mode(ui_in[7:6]), // Mode selector from input switches
+        .mode(ui_in[7:6]), 
         .hsync(hsync),
         .vsync(vsync),
         .display_on(display_on),
@@ -42,25 +42,29 @@ module tt_um_vga_glyph_mode (
         .vpos(vpos)
     );
 
-    // Grid coordinates (Scaling VGA pixels down into blocks)
+    // Grid coordinates (Scaling VGA pixels down into 16x16 blocks)
     wire [5:0] grid_x = hpos[9:4]; 
     wire [5:0] grid_y = vpos[9:4];
 
-    // Snake and Food state tracking registers
-    reg [5:0] snake_x;
-    reg [5:0] snake_y;
+    // 3-Square Snake Registers (Head + 2 Body Segments)
+    reg [5:0] head_x, head_y;
+    reg [5:0] seg1_x, seg1_y;
+    reg [5:0] seg2_x, seg2_y;
+
+    // Food and Score registers
     reg [5:0] food_x;
     reg [5:0] food_y;
+    reg [7:0] score;
 
     // Counter to control game speed tick rates
     reg [23:0] move_counter;
 
-    // Palette color wires
+    // Palette color wires[cite: 1]
     wire [5:0] bg_color;
     wire [5:0] snake_color;
     wire [5:0] food_color;
 
-    // Palette ROM instances mapping to purple/violet theme
+    // Palette ROM instances mapping to purple/violet theme[cite: 1]
     palette_rom bg_rom(
         .cid(3'd0), // Black background
         .pid(2'd2), 
@@ -79,41 +83,57 @@ module tt_um_vga_glyph_mode (
         .color(food_color)
     );
 
-    // Game logic for snake positioning and user input controls
+    // Game logic for snake movement, body shifting, and score tracking
     always @(posedge clk, negedge rst_n) begin
         if (!rst_n) begin
-            snake_x      <= 6'd20;
-            snake_y      <= 6'd15;
+            head_x       <= 6'd20;
+            head_y       <= 6'd15;
+            seg1_x       <= 6'd19;
+            seg1_y       <= 6'd15;
+            seg2_x       <= 6'd18;
+            seg2_y       <= 6'd15;
             food_x       <= 6'd10;
             food_y       <= 6'd10;
+            score        <= 8'd0;
             move_counter <= 0;
         end else begin
             move_counter <= move_counter + 1;
             
-            // Speed up the tick rate slightly so movement feels responsive
+            // Movement tick update speed
             if (move_counter == 24'd2500000) begin
                 move_counter <= 0;
                 
+                // Shift body segments forward to maintain a fixed 3-square length
+                seg2_x <= seg1_x; 
+                seg2_y <= seg1_y;
+                seg1_x <= head_x; 
+                seg1_y <= head_y;
+
                 // Direction inputs using lower bits of ui_in (Switches 0 to 3)
                 case (ui_in[3:0])
-                    4'b0001: snake_y <= snake_y - 1'b1; // Switch 0: Up
-                    4'b0010: snake_y <= snake_y + 1'b1; // Switch 1: Down
-                    4'b0100: snake_x <= snake_x - 1'b1; // Switch 2: Left
-                    4'b1000: snake_x <= snake_x + 1'b1; // Switch 3: Right
-                    default: snake_x <= snake_x + 1'b1; // Auto-move right by default
+                    4'b0001: head_y <= head_y - 1'b1; // Switch 0: Up
+                    4'b0010: head_y <= head_y + 1'b1; // Switch 1: Down
+                    4'b0100: head_x <= head_x - 1'b1; // Switch 2: Left
+                    4'b1000: head_x <= head_x + 1'b1; // Switch 3: Right
+                    default: head_x <= head_x + 1'b1; // Auto-move right by default
                 endcase
 
-                // Simple food collision check and repositioning logic
-                if ((snake_x == food_x) && (snake_y == food_y)) begin
-                    food_x <= (move_counter[7:2] % 6'd38) + 2'd2;
-                    food_y <= (move_counter[13:8] % 6'd28) + 2'd2;
+                // Food collision check: Eat food, increase score, and reposition food
+                if ((head_x == food_x) && (head_y == food_y)) begin
+                    score  <= score + 1'b1;
+                    food_x <= (move_counter[7:2] % 6'd36) + 6'd2;
+                    food_y <= (move_counter[13:8] % 6'd26) + 6'd2;
                 end
             end
         end
     end
 
-    // Rendering checks for objects on the active grid
-    wire is_snake = (grid_x == snake_x) && (grid_y == snake_y);
+    // Check if current grid matches any part of the 3-square snake
+    wire is_snake = (grid_x == head_x && grid_y == head_y) || 
+                    (grid_x == seg1_x && grid_y == seg1_y) || 
+                    (grid_x == seg2_x && grid_y == seg2_y);
+
+    // Check if current grid matches the food block
     wire is_food  = (grid_x == food_x) && (grid_y == food_y);
 
     // Multiplex final pixel colors sent to the VGA connector

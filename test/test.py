@@ -8,6 +8,8 @@ import itertools
 from PIL import Image, ImageChops
 
 
+export COCOTB_RESULTS_FILE = $(PWD)/results.xml
+
 @cocotb.test()
 async def test_project(dut):
 

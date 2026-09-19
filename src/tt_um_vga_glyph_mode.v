@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2026 CJ Torres / Snake Game Adaptation with Score & 3-Square Body
+ * Copyright (c) 2024-2026 CJ TORRES / Continuous Snake Game with Score Display
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -54,7 +54,7 @@ module tt_um_vga_glyph_mode (
     // Food and Score registers
     reg [5:0] food_x;
     reg [5:0] food_y;
-    reg [7:0] score;
+    reg [3:0] score; // Score from 0 to 9
 
     // Counter to control game speed tick rates
     reg [23:0] move_counter;
@@ -63,6 +63,7 @@ module tt_um_vga_glyph_mode (
     wire [5:0] bg_color;
     wire [5:0] snake_color;
     wire [5:0] food_color;
+    wire [5:0] text_color;
 
     // Palette ROM instances mapping to purple/violet theme[cite: 1]
     palette_rom bg_rom(
@@ -83,7 +84,13 @@ module tt_um_vga_glyph_mode (
         .color(food_color)
     );
 
-    // Game logic for snake movement, body shifting, and score tracking
+    palette_rom text_rom(
+        .cid(3'd6), // Bright white-purple for score display
+        .pid(2'd2), 
+        .color(text_color)
+    );
+
+    // Game logic for continuous wrapping movement and score updates
     always @(posedge clk, negedge rst_n) begin
         if (!rst_n) begin
             head_x       <= 6'd20;
@@ -94,7 +101,7 @@ module tt_um_vga_glyph_mode (
             seg2_y       <= 6'd15;
             food_x       <= 6'd10;
             food_y       <= 6'd10;
-            score        <= 8'd0;
+            score        <= 4'd0;
             move_counter <= 0;
         end else begin
             move_counter <= move_counter + 1;
@@ -103,30 +110,48 @@ module tt_um_vga_glyph_mode (
             if (move_counter == 24'd2500000) begin
                 move_counter <= 0;
                 
-                // Shift body segments forward to maintain a fixed 3-square length
+                // Shift body segments forward
                 seg2_x <= seg1_x; 
                 seg2_y <= seg1_y;
                 seg1_x <= head_x; 
                 seg1_y <= head_y;
 
-                // Direction inputs using lower bits of ui_in (Switches 0 to 3)
+                // Direction inputs with screen wrapping (no death upon hitting borders)
                 case (ui_in[3:0])
-                    4'b0001: head_y <= head_y - 1'b1; // Switch 0: Up
-                    4'b0010: head_y <= head_y + 1'b1; // Switch 1: Down
-                    4'b0100: head_x <= head_x - 1'b1; // Switch 2: Left
-                    4'b1000: head_x <= head_x + 1'b1; // Switch 3: Right
-                    default: head_x <= head_x + 1'b1; // Auto-move right by default
+                    4'b0001: head_y <= (head_y == 0) ? 6'd29 : head_y - 1'b1; // Up
+                    4'b0010: head_y <= (head_y == 29) ? 6'd0 : head_y + 1'b1; // Down
+                    4'b0100: head_x <= (head_x == 0) ? 6'd39 : head_x - 1'b1; // Left
+                    4'b1000: head_x <= (head_x == 39) ? 6'd0 : head_x + 1'b1; // Right
+                    default: head_x <= (head_x == 39) ? 6'd0 : head_x + 1'b1; // Auto-move right
                 endcase
 
-                // Food collision check: Eat food, increase score, and reposition food
+                // Food collision check: Eat food, increase score (max 9), and reposition food
                 if ((head_x == food_x) && (head_y == food_y)) begin
-                    score  <= score + 1'b1;
+                    if (score < 4'd9) score <= score + 1'b1;
                     food_x <= (move_counter[7:2] % 6'd36) + 6'd2;
                     food_y <= (move_counter[13:8] % 6'd26) + 6'd2;
                 end
             end
         end
     end
+
+    // --- Score Display via glyphs_rom ---
+    // Position score at the upper left (Column 2, Row 1)
+    wire [5:0] xb = hpos[10:3];
+    wire [5:0] yb = vpos[6:0];
+    wire is_score_area = (xb >= 6'd2 && xb <= 6'd3) && (yb >= 6'd2 && yb <= 6'd3);
+    
+    wire [3:0] glyph_y = vpos[3:0];
+    wire [2:0] glyph_x = hpos[2:0];
+    wire [5:0] glyph_char = (xb == 6'd2) ? 6'd28 : (6'd36 + {2'b00, score}); // Displays "S:" or numerical score mapping
+    
+    wire score_pixel;
+    glyphs_rom score_glyph(
+        .c(glyph_char),
+        .y(glyph_y),
+        .x(glyph_x),
+        .pixel(score_pixel)
+    );
 
     // Check if current grid matches any part of the 3-square snake
     wire is_snake = (grid_x == head_x && grid_y == head_y) || 
@@ -137,6 +162,6 @@ module tt_um_vga_glyph_mode (
     wire is_food  = (grid_x == food_x) && (grid_y == food_y);
 
     // Multiplex final pixel colors sent to the VGA connector
-    wire [5:0] RGB = display_on ? (is_snake ? snake_color : (is_food ? food_color : bg_color)) : 6'd0;
+    wire [5:0] RGB = display_on ? (is_score_area && score_pixel ? text_color : (is_snake ? snake_color : (is_food ? food_color : bg_color))) : 6'd0;
 
 endmodule

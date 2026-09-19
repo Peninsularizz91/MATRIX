@@ -9,11 +9,12 @@ You can also include images in this folder and reference them in the markdown. E
 
 ## How it works
 
-TBF
+Basic Snake Game Arrow up = 0 Arrow Down = 1 Arrow Left = 2
+Play Link :https://vga-playground.com/?repo=https://github.com/Peninsularizz91/MATRIX
 
 ## How to test
 
-TBF
+Connect to Monitor use keyboard and fire up the game
 
 ## External hardware
 

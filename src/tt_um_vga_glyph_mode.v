@@ -5,8 +5,8 @@
 
 `default_nettype none
 
-module tt_um_vga_glyph_mode(
-    input  wire [7:0] ui_in,    // Dedicated inputs (e.g., Direction controls: Up, Down, Left, Right)
+module tt_um_vga_glyph_mode (
+    input  wire [7:0] ui_in,    // Dedicated inputs (Direction controls: Up, Down, Left, Right)
     output wire [7:0] uo_out,   // Dedicated outputs (VGA Pmod signals)
     input  wire [7:0] uio_in,   // IOs: Input path
     output wire [7:0] uio_out,  // IOs: Output path
@@ -21,7 +21,7 @@ module tt_um_vga_glyph_mode(
     wire [10:0] hpos;
     wire [9:0] vpos;
 
-    // TinyVGA PMOD mapping matching your original setup
+    // TinyVGA PMOD color mapping layout matching the playground
     assign uo_out = {hsync, RGB[0], RGB[2], RGB[4], vsync, RGB[1], RGB[3], RGB[5]};
 
     assign uio_out = 0;
@@ -30,11 +30,11 @@ module tt_um_vga_glyph_mode(
     // Suppress unused signals warning
     wire _unused_ok = &{ena, uio_in, ui_in[7:4]};
 
-    // VGA output generator[cite: 2]
+    // VGA timing generation module
     hvsync_generator hvsync_gen(
         .clk(clk),
         .reset(~rst_n),
-        .mode(ui_in[7:6]), // Keep mode selection if desired
+        .mode(ui_in[7:6]), // Mode selector from input switches
         .hsync(hsync),
         .vsync(vsync),
         .display_on(display_on),
@@ -42,19 +42,17 @@ module tt_um_vga_glyph_mode(
         .vpos(vpos)
     );
 
-    // Define grid size (e.g., 32x32 blocks where each block is 16x16 pixels)
+    // Grid coordinates (Scaling VGA pixels down into blocks)
     wire [5:0] grid_x = hpos[9:4]; 
     wire [5:0] grid_y = vpos[9:4];
 
-    // Simple registers for Snake Head Position
+    // Snake and Food state tracking registers
     reg [5:0] snake_x;
     reg [5:0] snake_y;
-    
-    // Food Position (Static or pseudo-randomized via frame counters)
     reg [5:0] food_x;
     reg [5:0] food_y;
 
-    // Frame divider for game speed control
+    // Counter to control game speed tick rates
     reg [23:0] move_counter;
 
     // Palette color wires
@@ -62,25 +60,26 @@ module tt_um_vga_glyph_mode(
     wire [5:0] snake_color;
     wire [5:0] food_color;
 
+    // Palette ROM instances mapping to purple/violet theme
     palette_rom bg_rom(
-        .cid(3'd0), // black background
+        .cid(3'd0), // Black background
         .pid(2'd2), 
         .color(bg_color)
     );
 
     palette_rom snake_rom(
-        .cid(3'd3), // vibrant purple for snake
+        .cid(3'd3), // Vibrant purple for the snake
         .pid(2'd2), 
         .color(snake_color)
     );
 
     palette_rom food_rom(
-        .cid(3'd5), // lighter purple/pink for food
+        .cid(3'd5), // Lighter purple for food/apple
         .pid(2'd2), 
         .color(food_color)
     );
 
-    // Game Logic & Movement Update on vertical sync ticks or clock dividers
+    // Game logic for snake positioning and user input controls
     always @(posedge clk, negedge rst_n) begin
         if (!rst_n) begin
             snake_x      <= 6'd20;
@@ -91,20 +90,20 @@ module tt_um_vga_glyph_mode(
         end else begin
             move_counter <= move_counter + 1;
             
-            // Slow down movement updates so the snake doesn't fly across screen instantly
-            if (move_counter == 24'd5000000) begin
+            // Speed up the tick rate slightly so movement feels responsive
+            if (move_counter == 24'd2500000) begin
                 move_counter <= 0;
                 
-                // Basic directional movement controlled by ui_in [3:0] (e.g., Up, Down, Left, Right)
+                // Direction inputs using lower bits of ui_in (Switches 0 to 3)
                 case (ui_in[3:0])
-                    4'b0001: snake_y <= snake_y - 1'b1; // Up
-                    4'b0010: snake_y <= snake_y + 1'b1; // Down
-                    4'b0100: snake_x <= snake_x - 1'b1; // Left
-                    4'b1000: snake_x <= snake_x + 1'b1; // Right
-                    default: snake_x <= snake_x + 1'b1; // Default auto-move right
+                    4'b0001: snake_y <= snake_y - 1'b1; // Switch 0: Up
+                    4'b0010: snake_y <= snake_y + 1'b1; // Switch 1: Down
+                    4'b0100: snake_x <= snake_x - 1'b1; // Switch 2: Left
+                    4'b1000: snake_x <= snake_x + 1'b1; // Switch 3: Right
+                    default: snake_x <= snake_x + 1'b1; // Auto-move right by default
                 endcase
 
-                // Simple food collision check -> reset food to a new pseudo-location
+                // Simple food collision check and repositioning logic
                 if ((snake_x == food_x) && (snake_y == food_y)) begin
                     food_x <= (move_counter[7:2] % 6'd38) + 2'd2;
                     food_y <= (move_counter[13:8] % 6'd28) + 2'd2;
@@ -113,11 +112,11 @@ module tt_um_vga_glyph_mode(
         end
     end
 
-    // Pixel rendering decision based on grid coordinates
+    // Rendering checks for objects on the active grid
     wire is_snake = (grid_x == snake_x) && (grid_y == snake_y);
     wire is_food  = (grid_x == food_x) && (grid_y == food_y);
 
-    // Multiplex final RGB output based on display components
+    // Multiplex final pixel colors sent to the VGA connector
     wire [5:0] RGB = display_on ? (is_snake ? snake_color : (is_food ? food_color : bg_color)) : 6'd0;
 
 endmodule

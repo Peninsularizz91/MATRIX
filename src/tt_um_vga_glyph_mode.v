@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024-2026 James Ross / Snake Game Adaptation with Score & 3-Square Body
+ * Copyright (c) 2024-2026 CJ Torres / Snake Game Adaptation with Score & 3-Square Body
  * SPDX-License-Identifier: Apache-2.0
  */
 
